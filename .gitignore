@@ -1,0 +1,10 @@
+package-lock.json
+node_modules
+components
+dist
+.sass-cache
+*.swp
+.*.build
+.*.pass
+.cscope_db
+.DS_Store
