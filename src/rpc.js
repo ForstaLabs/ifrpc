@@ -18,7 +18,7 @@
     ns.RemoteError = class RemoteError extends Error {
         static serialize(error) {
             return {
-                type: error.type,
+                name: error.name,
                 message: error.message,
                 stack: error.stack
             };
@@ -26,7 +26,7 @@
 
         static deserialize(data) {
             const instance = new this(`${data.type}: ${data.message}`);
-            instance.remoteType = data.type;
+            instance.remoteName = data.name;
             instance.remoteMessage = data.message;
             instance.remoteStack = data.stack;
             return instance;
@@ -44,7 +44,7 @@
     }
 
     function sendCommandResponse(ev, success, response) {
-        sendMessage(ev.source, ev.origin, {
+        sendMessage(ev.source, peerOrigin, {
             op: 'command',
             dir: 'response',
             name: ev.data.name,
@@ -57,10 +57,17 @@
     async function handleCommandRequest(ev) {
         console.error("GOT a command", ev.data.name, ev.data.args);
         const handler = commands.get(ev.data.name);
+        if (!handler) {
+            const e = new ReferenceError('Invalid Command: ' + ev.data.name);
+            console.warn("HINT, valid commands:", Array.from(commands.keys()).join());
+            sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
+            throw e;
+        }
         try {
             sendCommandResponse(ev, /*success*/ true, await handler.apply(ev, ev.data.args));
         } catch(e) {
             sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
+            throw e;
         }
     }
 
@@ -89,6 +96,7 @@
     }
 
     ns.init = function(frame, options) {
+        options = options || {};
         if (options.magic) {
             magic = options.magic;
         }
@@ -96,8 +104,8 @@
             peerOrigin = options.peerOrigin;
         }
         peerFrame = frame;
-        frame.addEventListener('message', async ev => {
-            if (ev.origin !== peerOrigin) {
+        self.addEventListener('message', async ev => {
+            if (peerOrigin !== '*' && ev.origin !== peerOrigin) {
                 console.warn("Message from untrusted origin:", ev.origin);
                 return;
             }
@@ -127,7 +135,7 @@
     };
 
     ns.addCommandHandler = function(name, handler) {
-        if (!commands.has(name)) {
+        if (commands.has(name)) {
             throw new Error("Command handler already added: " + name);
         }
         commands.set(name, handler);
@@ -151,10 +159,11 @@
 
     ns.triggerEvent = function(name) {
         const args = Array.from(arguments).slice(1);
-        sendMessage(peerFrame, {
+        sendMessage(peerFrame, peerOrigin, {
+            op: 'event',
             name,
             args
-        }, peerOrigin);
+        });
     };
 
     let _idInc = 0;
@@ -164,13 +173,13 @@
         const promise = new Promise((resolve, reject) => {
             activeCommandRequests.set(id, {resolve, reject});
         });
-        sendMessage(peerFrame, {
+        sendMessage(peerFrame, peerOrigin, {
             op: 'command',
             dir: 'request',
             name,
             id,
             args
-        }, peerOrigin);
+        });
         return await promise;
     };
 })();
