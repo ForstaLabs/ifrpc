@@ -1,7 +1,7 @@
 {
-  "name": "relay-web-app-rpc",
+  "name": "irpc",
   "version": "1.0.0",
-  "description": "RPC interface for relay-web-app",
+  "description": "RPC interface for iframes",
   "license": "MIT",
   "devDependencies": {
     "eslint": "5.16.0"

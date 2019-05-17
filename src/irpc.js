@@ -3,12 +3,11 @@
 (function() {
     'use strict';
 
-    self.F = self.F || {};
-    const ns = self.F.rpc = {};
+    const ns = self.irpc = self.irpc || {};
 
     const version = 1;
-    let peerOrigin = '*';
-    let magic = 'forsta-rpc-magic-494581011';
+    let peerOrigin = '*'; // XXX default to more secure option
+    let magic = 'irpc-magic-494581011';
 
     let peerFrame;
     const commands = new Map();
@@ -39,7 +38,7 @@
             magic,
             version
         }, data);
-        console.debug("Send RPC message:", msg);
+        console.debug("Send irpc message:", msg);
         frame.postMessage(msg, origin);
     }
 
@@ -85,14 +84,14 @@
     async function handleEvent(ev) {
         const callbacks = listeners.get(ev.data.name);
         if (!callbacks || !callbacks.length) {
-            console.warn("RPC event triggered without listeners:", ev.data.name);
+            console.debug("irpc event triggered without listeners:", ev.data.name);
             return;
         }
         for (const cb of callbacks) {
             try {
                 await cb.apply(ev, ev.data.args);
             } catch(e) {
-                console.error("RPC Event Listener Error:", cb, e);
+                console.error("irpc Event Listener Error:", cb, e);
             }
         }
     }
@@ -113,7 +112,7 @@
             }
             const data = ev.data;
             if (!data || data.magic !== magic) {
-                console.error("Invalid RPC magic");
+                console.error("Invalid irpc magic");
                 return;
             }
             if (data.version !== version) {
@@ -131,15 +130,15 @@
             } else if (data.op === 'event') {
                 await handleEvent(ev);
             } else {
-                throw new Error("Invalid RPC Operation");
+                throw new Error("Invalid irpc Operation");
             }
         });
 
         // Couple meta commands for discovery...
-        ns.addCommandHandler('rpc.get-commands', () => {
+        ns.addCommandHandler('irpc-get-commands', () => {
             return Array.from(commands.keys());
         });
-        ns.addCommandHandler('rpc.get-listeners', () => {
+        ns.addCommandHandler('irpc-get-listeners', () => {
             return Array.from(listeners.keys());
         });
     };
