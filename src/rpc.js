@@ -25,7 +25,7 @@
         }
 
         static deserialize(data) {
-            const instance = new this(`${data.type}: ${data.message}`);
+            const instance = new this(`Remote Error: <${data.name}: ${data.message}>`);
             instance.remoteName = data.name;
             instance.remoteMessage = data.message;
             instance.remoteStack = data.stack;
@@ -55,11 +55,9 @@
     }
 
     async function handleCommandRequest(ev) {
-        console.error("GOT a command", ev.data.name, ev.data.args);
         const handler = commands.get(ev.data.name);
         if (!handler) {
             const e = new ReferenceError('Invalid Command: ' + ev.data.name);
-            console.warn("HINT, valid commands:", Array.from(commands.keys()).join());
             sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
             throw e;
         }
@@ -85,12 +83,16 @@
     }
 
     async function handleEvent(ev) {
-        console.error("GOT an event", ev.data.name, ev.data.args);
-        for (const listener of listeners.get(ev.data.name) || []) {
+        const callbacks = listeners.get(ev.data.name);
+        if (!callbacks || !callbacks.length) {
+            console.warn("RPC event triggered without listeners:", ev.data.name);
+            return;
+        }
+        for (const cb of callbacks) {
             try {
-                await listener.apply(ev, ev.data.args);
+                await cb.apply(ev, ev.data.args);
             } catch(e) {
-                console.error("RPC Event Listener Error:", listener, e);
+                console.error("RPC Event Listener Error:", cb, e);
             }
         }
     }
@@ -132,6 +134,14 @@
                 throw new Error("Invalid RPC Operation");
             }
         });
+
+        // Couple meta commands for discovery...
+        ns.addCommandHandler('rpc.get-commands', () => {
+            return Array.from(commands.keys());
+        });
+        ns.addCommandHandler('rpc.get-listeners', () => {
+            return Array.from(listeners.keys());
+        });
     };
 
     ns.addCommandHandler = function(name, handler) {
@@ -158,6 +168,9 @@
     };
 
     ns.triggerEvent = function(name) {
+        if (!peerFrame) {
+            return;  // Not initialized
+        }
         const args = Array.from(arguments).slice(1);
         sendMessage(peerFrame, peerOrigin, {
             op: 'event',
@@ -168,6 +181,9 @@
 
     let _idInc = 0;
     ns.invokeCommand = async function(name) {
+        if (!peerFrame) {
+            throw new Error("Not Initialized");
+        }
         const args = Array.from(arguments).slice(1);
         const id = `${Date.now()}-${_idInc++}`;
         const promise = new Promise((resolve, reject) => {
