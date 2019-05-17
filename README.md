@@ -88,6 +88,7 @@ const pong = await irpc.invokeCommand('ping');
 console.assert(pong === 'pong');
 ```
 
+
 **Argument passing**
 ```javascript
 irpc.addCommandHandler('sum', (a, b) => a + b);
@@ -97,6 +98,7 @@ irpc.addCommandHandler('sum', (a, b) => a + b);
 const sum = await irpc.invokeCommand('sum', 1, 1);
 console.assert(sum === 2);
 ```
+
 
 **Async handler**
 ```javascript
@@ -109,4 +111,28 @@ irpc.addCommandHandler('soon', async () => {
 ```javascript
 const soon = await irpc.invokeCommand('soon');
 console.assert(soon === true);
+```
+
+
+**Simple event**
+```javascript
+irpc.addEventListener('hello', () => {
+    console.warn("The peer frame said hello");
+});
+```
+
+```javascript
+irpc.triggerEvent('hello');
+```
+
+
+**Event with args**
+```javascript
+irpc.addEventListener('hello', whom => {
+    console.warn("The peer frame said hello to", whom);
+});
+```
+
+```javascript
+irpc.triggerEvent('hello', 'Bob');
 ```
