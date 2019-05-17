@@ -3,11 +3,11 @@
 (function() {
     'use strict';
 
-    const ns = self.irpc = self.irpc || {};
+    const ns = self.ifrpc = self.ifrpc || {};
 
     const version = 1;
     let peerOrigin = '*'; // XXX default to more secure option
-    let magic = 'irpc-magic-494581011';
+    let magic = 'ifrpc-magic-494581011';
 
     let peerFrame;
     const commands = new Map();
@@ -38,7 +38,7 @@
             magic,
             version
         }, data);
-        console.debug("Send irpc message:", msg);
+        console.debug("Send ifrpc message:", msg);
         frame.postMessage(msg, origin);
     }
 
@@ -84,14 +84,14 @@
     async function handleEvent(ev) {
         const callbacks = listeners.get(ev.data.name);
         if (!callbacks || !callbacks.length) {
-            console.debug("irpc event triggered without listeners:", ev.data.name);
+            console.debug("ifrpc event triggered without listeners:", ev.data.name);
             return;
         }
         for (const cb of callbacks) {
             try {
                 await cb.apply(ev, ev.data.args);
             } catch(e) {
-                console.error("irpc Event Listener Error:", cb, e);
+                console.error("ifrpc event listener error:", cb, e);
             }
         }
     }
@@ -112,7 +112,7 @@
             }
             const data = ev.data;
             if (!data || data.magic !== magic) {
-                console.error("Invalid irpc magic");
+                console.error("Invalid ifrpc magic");
                 return;
             }
             if (data.version !== version) {
@@ -130,15 +130,15 @@
             } else if (data.op === 'event') {
                 await handleEvent(ev);
             } else {
-                throw new Error("Invalid irpc Operation");
+                throw new Error("Invalid ifrpc Operation");
             }
         });
 
         // Couple meta commands for discovery...
-        ns.addCommandHandler('irpc-get-commands', () => {
+        ns.addCommandHandler('ifrpc-get-commands', () => {
             return Array.from(commands.keys());
         });
-        ns.addCommandHandler('irpc-get-listeners', () => {
+        ns.addCommandHandler('ifrpc-get-listeners', () => {
             return Array.from(listeners.keys());
         });
     };

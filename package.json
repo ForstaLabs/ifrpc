@@ -1,5 +1,5 @@
 {
-  "name": "irpc",
+  "name": "ifrpc",
   "version": "1.0.0",
   "description": "RPC interface for iframes",
   "license": "MIT",
