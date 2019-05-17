@@ -54,48 +54,51 @@ invocation of commands is a Promise based interface so the caller doesn't need
 to be concerned with the mechanics of the message passing.
 
 The main functions to use are:
- * `irpc.addCommandHandler(name, callback)`: `name` should any string and callback
-   should be a `function` or `async function` whose return value will be sent to the
-   invoking peer.
- * `irpc.addEventListener(name, callback)`: `name` should any string and callback
-   should be a `function` or `async function`.
- * `irpc.triggerEvent(name, ...args)`: `name` is the event name defined by the peer
-   frame with `irpc.addEventListener`.
- * `irpc.invokeCommand(name, ...args)`: `name` is the command name defined by the peer
-   frame with `irpc.addCommandHandler`.  This function returns a Promise that resolves
-   with the eventual return value of the command handler's callback.  If the command
-   handler throws an exception the Promise will reject with an `iprc.RemoteError`
-   exception describing the remote error.
+ * `irpc.addCommandHandler(name, callback)`:
+    * `name` should any string.
+    * `callback` should be a `function` or `async function` whose return value
+     will be sent to the invoking peer.
+ * `irpc.addEventListener(name, callback)`:
+    * `name` should any string.
+    * `callback` should be a `function` or `async function`.
+ * `irpc.triggerEvent(name, ...args)`:
+    * `name` is the event name defined by the peer frame with
+      `irpc.addEventListener`.
+ * `irpc.invokeCommand(name, ...args)`:
+    * `name` is the command name defined by the peer frame with
+      `irpc.addCommandHandler`.
+    * Returns a `Promise` that resolves with the eventual return value of the
+      command handler's callback.  If the command handler throws an exception
+      the `Promise` will reject with an `iprc.RemoteError` exception describing
+      the remote error.
 
 
 Examples
 --------
-### Simple ping/pong...
-**App A**
+Each of these examples shows code from 2 applications who are presumed to be
+peers.  *Peers* meaning that one is an iframe of the other.
+
+**Simple ping/pong**
 ```javascript
 irpc.addCommandHandler('ping', () => 'pong');
 ```
 
-**App B**
 ```javascript
 const pong = await irpc.invokeCommand('ping');
 console.assert(pong === 'pong');
 ```
 
-### Argument passing...
-**App A**
+**Argument passing**
 ```javascript
 irpc.addCommandHandler('sum', (a, b) => a + b);
 ```
 
-**App B**
 ```javascript
 const sum = await irpc.invokeCommand('sum', 1, 1);
 console.assert(sum === 2);
 ```
 
-### Async handler...
-**App A**
+**Async handler**
 ```javascript
 irpc.addCommandHandler('soon', async () => {
     await somethingAsync();
@@ -103,7 +106,6 @@ irpc.addCommandHandler('soon', async () => {
 }
 ```
 
-**App B**
 ```javascript
 const soon = await irpc.invokeCommand('soon');
 console.assert(soon === true);
