@@ -5,14 +5,11 @@
 
     const ns = self.ifrpc = self.ifrpc || {};
 
-    const version = 1;
-    let peerOrigin = '*'; // XXX default to more secure option
-    let magic = 'ifrpc-magic-494581011';
+    const version = 2;
+    const defaultPeerOrigin = '*'; // XXX default to more secure option
+    const defaultMagic = 'ifrpc-magic-494581011';
 
-    let peerFrame;
-    const commands = new Map();
-    const listeners = new Map();
-    const activeCommandRequests = new Map();
+    let _idInc = 0;
 
     ns.RemoteError = class RemoteError extends Error {
         static serialize(error) {
@@ -33,168 +30,167 @@
     };
 
 
-    function sendMessage(frame, origin, data) {
-        const msg = Object.assign({
-            magic,
-            version
-        }, data);
-        console.debug("Send ifrpc message:", msg);
-        frame.postMessage(msg, origin);
-    }
-
-    function sendCommandResponse(ev, success, response) {
-        sendMessage(ev.source, peerOrigin, {
-            op: 'command',
-            dir: 'response',
-            name: ev.data.name,
-            id: ev.data.id,
-            success,
-            response
-        });
-    }
-
-    async function handleCommandRequest(ev) {
-        const handler = commands.get(ev.data.name);
-        if (!handler) {
-            const e = new ReferenceError('Invalid Command: ' + ev.data.name);
-            sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
-            throw e;
-        }
-        try {
-            sendCommandResponse(ev, /*success*/ true, await handler.apply(ev, ev.data.args));
-        } catch(e) {
-            sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
-            throw e;
-        }
-    }
-
-    async function handleCommandResponse(ev) {
-        const request = activeCommandRequests.get(ev.data.id);
-        if (!request) {
-            throw new Error("Invalid request ID");
-        }
-        activeCommandRequests.delete(ev.data.id);
-        if (ev.data.success) {
-            request.resolve(ev.data.response);
-        } else {
-            request.reject(ns.RemoteError.deserialize(ev.data.response));
-        }
-    }
-
-    async function handleEvent(ev) {
-        const callbacks = listeners.get(ev.data.name);
-        if (!callbacks || !callbacks.length) {
-            console.debug("ifrpc event triggered without listeners:", ev.data.name);
-            return;
-        }
-        for (const cb of callbacks) {
-            try {
-                await cb.apply(ev, ev.data.args);
-            } catch(e) {
-                console.error("ifrpc event listener error:", cb, e);
-            }
-        }
-    }
-
-    ns.init = function(frame, options) {
-        options = options || {};
-        if (options.magic) {
-            magic = options.magic;
-        }
-        if (options.peerOrigin) {
-            peerOrigin = options.peerOrigin;
-        }
-        peerFrame = frame;
-        self.addEventListener('message', async ev => {
-            if (peerOrigin !== '*' && ev.origin !== peerOrigin) {
-                console.warn("Message from untrusted origin:", ev.origin);
-                return;
-            }
-            const data = ev.data;
-            if (!data || data.magic !== magic) {
-                console.error("Invalid ifrpc magic");
-                return;
-            }
-            if (data.version !== version) {
-                console.error(`Version mismatch: expected ${version} but got ${data.version}`);
-                return;
-            }
-            if (data.op === 'command') {
-                if (data.dir === 'request') {
-                    await handleCommandRequest(ev);
-                } else if (data.dir === 'response') {
-                    await handleCommandResponse(ev);
-                } else {
-                    throw new Error("Command Direction Missing");
+    class RPC {
+        constructor(peerFrame, options) {
+            options = options || {};
+            this.peerFrame = peerFrame;
+            this.magic = options.magic || defaultMagic;
+            this.peerOrigin = options.peerOrigin || defaultPeerOrigin;
+            this.commands = new Map();
+            this.listeners = new Map();
+            this.activeCommandRequests = new Map();
+            self.addEventListener('message', async ev => {
+                if (ev.source !== this.peerFrame) {
+                    return;
                 }
-            } else if (data.op === 'event') {
-                await handleEvent(ev);
-            } else {
-                throw new Error("Invalid ifrpc Operation");
+                if (this.peerOrigin !== '*' && ev.origin !== this.peerOrigin) {
+                    console.warn("Message from untrusted origin:", ev.origin);
+                    return;
+                }
+                const data = ev.data;
+                if (!data || data.magic !== this.magic) {
+                    console.error("Invalid ifrpc magic");
+                    return;
+                }
+                if (data.version !== version) {
+                    console.error(`Version mismatch: expected ${version} but got ${data.version}`);
+                    return;
+                }
+                if (data.op === 'command') {
+                    if (data.dir === 'request') {
+                        await this.handleCommandRequest(ev);
+                    } else if (data.dir === 'response') {
+                        await this.handleCommandResponse(ev);
+                    } else {
+                        throw new Error("Command Direction Missing");
+                    }
+                } else if (data.op === 'event') {
+                    await this.handleEvent(ev);
+                } else {
+                    throw new Error("Invalid ifrpc Operation");
+                }
+            });
+
+            // Couple meta commands for discovery...
+            this.addCommandHandler('ifrpc-get-commands', () => {
+                return Array.from(this.commands.keys());
+            });
+            this.addCommandHandler('ifrpc-get-listeners', () => {
+                return Array.from(this.listeners.keys());
+            });
+        }
+
+        addCommandHandler(name, handler) {
+            if (this.commands.has(name)) {
+                throw new Error("Command handler already added: " + name);
             }
-        });
-
-        // Couple meta commands for discovery...
-        ns.addCommandHandler('ifrpc-get-commands', () => {
-            return Array.from(commands.keys());
-        });
-        ns.addCommandHandler('ifrpc-get-listeners', () => {
-            return Array.from(listeners.keys());
-        });
-    };
-
-    ns.addCommandHandler = function(name, handler) {
-        if (commands.has(name)) {
-            throw new Error("Command handler already added: " + name);
+            this.commands.set(name, handler);
         }
-        commands.set(name, handler);
-    };
 
-    ns.removeCommandHandler = function(name) {
-        commands.delete(name);
-    };
-
-    ns.addEventListener = function(name, callback) {
-        if (!listeners.has(name)) {
-            listeners.set(name, []);
+        removeCommandHandler(name) {
+            this.commands.delete(name);
         }
-        listeners.get(name).push(callback);
-    };
 
-    ns.removeEventListener = function(name, callback) {
-        const scrubbed = listeners.get(name).fitler(x => x !== callback);
-        listeners.set(name, scrubbed);
-    };
-
-    ns.triggerEvent = function(name) {
-        if (!peerFrame) {
-            return;  // Not initialized
+        addEventListener(name, callback) {
+            if (!this.listeners.has(name)) {
+                this.listeners.set(name, []);
+            }
+            this.listeners.get(name).push(callback);
         }
-        const args = Array.from(arguments).slice(1);
-        sendMessage(peerFrame, peerOrigin, {
-            op: 'event',
-            name,
-            args
-        });
-    };
 
-    let _idInc = 0;
-    ns.invokeCommand = async function(name) {
-        if (!peerFrame) {
-            throw new Error("Not Initialized");
+        removeEventListener(name, callback) {
+            const scrubbed = this.listeners.get(name).fitler(x => x !== callback);
+            this.listeners.set(name, scrubbed);
         }
-        const args = Array.from(arguments).slice(1);
-        const id = `${Date.now()}-${_idInc++}`;
-        const promise = new Promise((resolve, reject) => {
-            activeCommandRequests.set(id, {resolve, reject});
-        });
-        sendMessage(peerFrame, peerOrigin, {
-            op: 'command',
-            dir: 'request',
-            name,
-            id,
-            args
-        });
-        return await promise;
-    };
+
+        triggerEvent(name) {
+            const args = Array.from(arguments).slice(1);
+            this.sendMessage({
+                op: 'event',
+                name,
+                args
+            });
+        }
+
+        async invokeCommand(name) {
+            const args = Array.from(arguments).slice(1);
+            const id = `${Date.now()}-${_idInc++}`;
+            const promise = new Promise((resolve, reject) => {
+                this.activeCommandRequests.set(id, {resolve, reject});
+            });
+            this.sendMessage({
+                op: 'command',
+                dir: 'request',
+                name,
+                id,
+                args
+            });
+            return await promise;
+        }
+
+        sendMessage(data) {
+            const msg = Object.assign({
+                magic: this.magic,
+                version
+            }, data);
+            console.debug("Send ifrpc message:", msg);
+            this.peerFrame.postMessage(msg, this.peerOrigin);
+        }
+
+        sendCommandResponse(ev, success, response) {
+            this.sendMessage({
+                op: 'command',
+                dir: 'response',
+                name: ev.data.name,
+                id: ev.data.id,
+                success,
+                response
+            });
+        }
+
+        async handleCommandRequest(ev) {
+            const handler = this.commands.get(ev.data.name);
+            if (!handler) {
+                const e = new ReferenceError('Invalid Command: ' + ev.data.name);
+                this.sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
+                throw e;
+            }
+            try {
+                this.sendCommandResponse(ev, /*success*/ true, await handler.apply(ev, ev.data.args));
+            } catch(e) {
+                this.sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
+                throw e;
+            }
+        }
+
+        async handleCommandResponse(ev) {
+            const request = this.activeCommandRequests.get(ev.data.id);
+            if (!request) {
+                throw new Error("Invalid request ID");
+            }
+            this.activeCommandRequests.delete(ev.data.id);
+            if (ev.data.success) {
+                request.resolve(ev.data.response);
+            } else {
+                request.reject(ns.RemoteError.deserialize(ev.data.response));
+            }
+        }
+
+        async handleEvent(ev) {
+            const callbacks = this.listeners.get(ev.data.name);
+            if (!callbacks || !callbacks.length) {
+                console.debug("ifrpc event triggered without listeners:", ev.data.name);
+                return;
+            }
+            for (const cb of callbacks) {
+                try {
+                    await cb.apply(ev, ev.data.args);
+                } catch(e) {
+                    console.error("ifrpc event listener error:", cb, e);
+                }
+            }
+        }
+    }
+
+    ns.init = (frame, options) => new RPC(frame, options);
 })();
