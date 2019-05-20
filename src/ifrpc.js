@@ -13,18 +13,16 @@
 
     ns.RemoteError = class RemoteError extends Error {
         static serialize(error) {
-            return {
+            return Object.assign({
                 name: error.name,
                 message: error.message,
                 stack: error.stack
-            };
+            }, JSON.parse(JSON.stringify(error)));
         }
 
         static deserialize(data) {
-            const instance = new this(`Remote Error: <${data.name}: ${data.message}>`);
-            instance.remoteName = data.name;
-            instance.remoteMessage = data.message;
-            instance.remoteStack = data.stack;
+            const instance = new this(`Remote error: <${data.name}: ${data.message}>`);
+            instance.remoteError = data;
             return instance;
         }
     };
@@ -159,7 +157,6 @@
                 this.sendCommandResponse(ev, /*success*/ true, await handler.apply(ev, ev.data.args));
             } catch(e) {
                 this.sendCommandResponse(ev, /*success*/ false, ns.RemoteError.serialize(e));
-                throw e;
             }
         }
 
