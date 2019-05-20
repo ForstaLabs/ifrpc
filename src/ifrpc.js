@@ -131,7 +131,6 @@
                 magic: this.magic,
                 version
             }, data);
-            console.debug("Send ifrpc message:", msg);
             this.peerFrame.postMessage(msg, this.peerOrigin);
         }
 
