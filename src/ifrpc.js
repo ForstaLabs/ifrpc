@@ -38,7 +38,10 @@
             this.listeners = new Map();
             this.activeCommandRequests = new Map();
             self.addEventListener('message', async ev => {
-                if (ev.source !== this.peerFrame) {
+                // Immediately drop messages coming from unrelated frames.
+                if (ev.source !== this.peerFrame &&
+                    ev.source.opener !== this.peerFrame && // Popups from peer
+                    ev.source.parent !== this.peerFrame) { // Iframes of peer
                     return;
                 }
                 if (this.peerOrigin !== '*' && ev.origin !== this.peerOrigin) {
