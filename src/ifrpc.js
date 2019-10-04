@@ -5,7 +5,7 @@
 
     const ns = self.ifrpc = self.ifrpc || {};
 
-    const version = 2;
+    const version = 3;
     const defaultPeerOrigin = '*';
     const defaultMagic = 'ifrpc-magic-494581011';
 
@@ -29,49 +29,18 @@
 
 
     class RPC {
+
         constructor(peerFrame, options) {
             options = options || {};
             this.peerFrame = peerFrame;
             this.magic = options.magic || defaultMagic;
             this.peerOrigin = options.peerOrigin || defaultPeerOrigin;
+            this.acceptOpener = !!options.acceptOpener;
+            this.acceptParent = !!options.acceptParent;
             this.commands = new Map();
             this.listeners = new Map();
             this.activeCommandRequests = new Map();
-            self.addEventListener('message', async ev => {
-                // Immediately drop messages coming from unrelated frames.
-                if (!ev.source ||
-                    (ev.source !== this.peerFrame &&
-                     ev.source.opener !== this.peerFrame && // Popups from peer
-                     ev.source.parent !== this.peerFrame)) { // Iframes of peer
-                    return;
-                }
-                if (this.peerOrigin !== '*' && ev.origin !== this.peerOrigin) {
-                    console.warn("Message from untrusted origin:", ev.origin);
-                    return;
-                }
-                const data = ev.data;
-                if (!data || data.magic !== this.magic) {
-                    console.error("Invalid ifrpc magic");
-                    return;
-                }
-                if (data.version !== version) {
-                    console.error(`Version mismatch: expected ${version} but got ${data.version}`);
-                    return;
-                }
-                if (data.op === 'command') {
-                    if (data.dir === 'request') {
-                        await this.handleCommandRequest(ev);
-                    } else if (data.dir === 'response') {
-                        await this.handleCommandResponse(ev);
-                    } else {
-                        throw new Error("Command Direction Missing");
-                    }
-                } else if (data.op === 'event') {
-                    await this.handleEvent(ev);
-                } else {
-                    throw new Error("Invalid ifrpc Operation");
-                }
-            });
+            this.constructor.registerMessageHandler(this);
 
             // Couple meta commands for discovery...
             this.addCommandHandler('ifrpc-get-commands', () => {
@@ -80,6 +49,57 @@
             this.addCommandHandler('ifrpc-get-listeners', () => {
                 return Array.from(this.listeners.keys());
             });
+        }
+
+        static registerMessageHandler(rpc) {
+            if (!this._registered) {
+                self.addEventListener('message', this.onMessage.bind(this));
+                this._registered = [];
+            }
+            this._registered.push(rpc);
+        }
+
+        static async onMessage(ev) {
+            if (!ev.source) {
+                return;  // Source frame is gone already.
+            }
+            for (const rpc of this._registered) {
+                if (rpc.peerOrigin !== '*' && ev.origin !== rpc.peerOrigin) {
+                    continue;
+                }
+                const validFrames = new Set([ev.source]);
+                if (rpc.acceptOpener && ev.source.opener) {
+                    validFrames.add(ev.source.opener);
+                }
+                if (rpc.acceptParent && ev.source.parent) {
+                    validFrames.add(ev.source.parent);
+                }
+                if (!validFrames.has(rpc.peerFrame)) {
+                    continue;
+                }
+                const data = ev.data;
+                if (!data || data.magic !== rpc.magic) {
+                    console.warn("Invalid ifrpc magic");
+                    continue;
+                }
+                if (data.version !== version) {
+                    console.error(`Version mismatch: expected ${version} but got ${data.version}`);
+                    continue;
+                }
+                if (data.op === 'command') {
+                    if (data.dir === 'request') {
+                        await rpc.handleCommandRequest(ev);
+                    } else if (data.dir === 'response') {
+                        await rpc.handleCommandResponse(ev);
+                    } else {
+                        throw new Error("Command Direction Missing");
+                    }
+                } else if (data.op === 'event') {
+                    await rpc.handleEvent(ev);
+                } else {
+                    throw new Error("Invalid ifrpc Operation");
+                }
+            }
         }
 
         addCommandHandler(name, handler) {
@@ -135,7 +155,7 @@
         }
 
         async invokeCommand(name) {
-            return await this.invokeCommand.apply(this, [this.peerFrame].concat(Array.from(arguments)));
+            return await this.invokeCommandWithFrame.apply(this, [this.peerFrame].concat(Array.from(arguments)));
         }
 
         sendMessage(frame, data) {
