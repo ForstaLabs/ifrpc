@@ -6,7 +6,7 @@
     const ns = self.ifrpc = self.ifrpc || {};
 
     const version = 2;
-    const defaultPeerOrigin = '*'; // XXX default to more secure option
+    const defaultPeerOrigin = '*';
     const defaultMagic = 'ifrpc-magic-494581011';
 
     let _idInc = 0;
@@ -39,9 +39,10 @@
             this.activeCommandRequests = new Map();
             self.addEventListener('message', async ev => {
                 // Immediately drop messages coming from unrelated frames.
-                if (ev.source !== this.peerFrame &&
-                    ev.source.opener !== this.peerFrame && // Popups from peer
-                    ev.source.parent !== this.peerFrame) { // Iframes of peer
+                if (!ev.source ||
+                    (ev.source !== this.peerFrame &&
+                     ev.source.opener !== this.peerFrame && // Popups from peer
+                     ev.source.parent !== this.peerFrame)) { // Iframes of peer
                     return;
                 }
                 if (this.peerOrigin !== '*' && ev.origin !== this.peerOrigin) {
@@ -104,22 +105,26 @@
             this.listeners.set(name, scrubbed);
         }
 
-        triggerEvent(name) {
-            const args = Array.from(arguments).slice(1);
-            this.sendMessage({
+        triggerEventWithFrame(frame, name) {
+            const args = Array.from(arguments).slice(2);
+            this.sendMessage(frame, {
                 op: 'event',
                 name,
                 args
             });
         }
 
-        async invokeCommand(name) {
-            const args = Array.from(arguments).slice(1);
+        triggerEvent(name) {
+            return this.triggerEventWithFrame.apply(this, [this.peerFrame].concat(Array.from(arguments)));
+        }
+
+        async invokeCommandWithFrame(frame, name) {
+            const args = Array.from(arguments).slice(2);
             const id = `${Date.now()}-${_idInc++}`;
             const promise = new Promise((resolve, reject) => {
                 this.activeCommandRequests.set(id, {resolve, reject});
             });
-            this.sendMessage({
+            this.sendMessage(frame, {
                 op: 'command',
                 dir: 'request',
                 name,
@@ -129,16 +134,20 @@
             return await promise;
         }
 
-        sendMessage(data) {
+        async invokeCommand(name) {
+            return await this.invokeCommand.apply(this, [this.peerFrame].concat(Array.from(arguments)));
+        }
+
+        sendMessage(frame, data) {
             const msg = Object.assign({
                 magic: this.magic,
                 version
             }, data);
-            this.peerFrame.postMessage(msg, this.peerOrigin);
+            frame.postMessage(msg, this.peerOrigin);
         }
 
         sendCommandResponse(ev, success, response) {
-            this.sendMessage({
+            this.sendMessage(ev.source, {
                 op: 'command',
                 dir: 'response',
                 name: ev.data.name,
